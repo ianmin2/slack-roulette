@@ -1,1 +1,0 @@
-/home/ian/.claude/claude.md

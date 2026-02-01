@@ -47,4 +47,9 @@ Thumbs.db
 # Misc
 *.log
 
+# Claude AI context (personal/local)
+.claude/
+CLAUDE.md
+
+# Prisma generated
 /src/generated/prisma
