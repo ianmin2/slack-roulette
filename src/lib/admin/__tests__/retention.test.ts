@@ -162,16 +162,17 @@ describe('Data Retention', () => {
         expect(mockedDb.assignment.deleteMany).toHaveBeenCalled();
       });
 
-      it('soft-deletes records with archive action', async () => {
+      it('marks records as EXPIRED with archive action', async () => {
         mockedDb.assignment.updateMany.mockResolvedValue({ count: 5 });
 
         const policy = retention.getPolicy('assignments-completed')!;
         const result = await retention.executePolicy(policy, false);
 
         expect(result.recordsProcessed).toBe(5);
+        // Assignment model doesn't have deletedAt, so archive uses EXPIRED status
         expect(mockedDb.assignment.updateMany).toHaveBeenCalledWith(
           expect.objectContaining({
-            data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+            data: expect.objectContaining({ status: 'EXPIRED' }),
           })
         );
       });
@@ -259,18 +260,15 @@ describe('Data Retention', () => {
     });
 
     describe('audit logs', () => {
-      it('archives audit logs', async () => {
-        mockedDb.auditLog.updateMany.mockResolvedValue({ count: 200 });
+      it('archives audit logs (uses deleteMany - no soft delete field)', async () => {
+        // AuditLog model doesn't have an archived field, so archive uses deleteMany
+        mockedDb.auditLog.deleteMany.mockResolvedValue({ count: 200 });
 
         const policy = retention.getPolicy('audit-logs')!;
         const result = await retention.executePolicy(policy, false);
 
         expect(result.recordsProcessed).toBe(200);
-        expect(mockedDb.auditLog.updateMany).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({ archived: true }),
-          })
-        );
+        expect(mockedDb.auditLog.deleteMany).toHaveBeenCalled();
       });
 
       it('deletes audit logs', async () => {
@@ -352,7 +350,8 @@ describe('Data Retention', () => {
   describe('stats and results', () => {
     it('updates stats after execution', async () => {
       mockedDb.assignment.updateMany.mockResolvedValue({ count: 10 });
-      mockedDb.auditLog.updateMany.mockResolvedValue({ count: 5 });
+      // AuditLog archive action now uses deleteMany (no soft delete field)
+      mockedDb.auditLog.deleteMany.mockResolvedValue({ count: 5 });
 
       // Enable only assignment and audit policies
       retention.setEnabled('assignments-abandoned', false);

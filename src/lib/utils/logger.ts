@@ -124,8 +124,8 @@ class Logger {
   }
 
   error(message: string, context?: LogContext): void;
-  error(message: string, error: Error | undefined, context?: LogContext): void;
-  error(message: string, errorOrContext?: Error | LogContext | undefined, context?: LogContext): void {
+  error(message: string, error: unknown, context?: LogContext): void;
+  error(message: string, errorOrContext?: unknown, context?: LogContext): void {
     let finalContext = context;
     if (errorOrContext instanceof Error) {
       finalContext = {
@@ -136,8 +136,15 @@ class Logger {
           stack: errorOrContext.stack,
         },
       };
-    } else if (errorOrContext && typeof errorOrContext === 'object') {
-      finalContext = errorOrContext;
+    } else if (errorOrContext && typeof errorOrContext === 'object' && !('message' in errorOrContext && 'name' in errorOrContext)) {
+      // It's a LogContext object, not an Error-like object
+      finalContext = errorOrContext as LogContext;
+    } else if (errorOrContext !== undefined) {
+      // Unknown error type - stringify it
+      finalContext = {
+        ...context,
+        error: String(errorOrContext),
+      };
     }
     this.log('error', message, finalContext);
   }

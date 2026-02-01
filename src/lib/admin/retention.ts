@@ -289,11 +289,10 @@ class RetentionManager {
         return result.count;
       }
       case 'archive': {
-        // Archive by soft-deleting (if supported) or moving to archive table
-        // For now, we'll use soft delete with a flag
+        // Archive by marking as EXPIRED (Assignment model doesn't have deletedAt)
         const result = await db.assignment.updateMany({
           where: whereClause,
-          data: { deletedAt: new Date() },
+          data: { status: 'EXPIRED' },
         });
         return result.count;
       }
@@ -358,7 +357,7 @@ class RetentionManager {
     dryRun: boolean
   ): Promise<number> {
     const whereClause = {
-      timestamp: { lt: cutoff },
+      createdAt: { lt: cutoff },
     };
 
     if (dryRun) {
@@ -367,23 +366,17 @@ class RetentionManager {
     }
 
     switch (policy.action) {
-      case 'delete': {
+      case 'delete':
+      case 'archive': {
+        // AuditLog doesn't have soft delete - use hard delete for both
         const result = await db.auditLog.deleteMany({ where: whereClause });
         return result.count;
       }
-      case 'archive': {
-        // Archive by soft-deleting
-        const result = await db.auditLog.updateMany({
-          where: whereClause,
-          data: { archived: true },
-        });
-        return result.count;
-      }
       case 'anonymize': {
-        // Anonymize user info in audit logs
+        // Anonymize by removing user reference
         const result = await db.auditLog.updateMany({
           where: whereClause,
-          data: { userId: '[ANONYMIZED]' },
+          data: { userId: null },
         });
         return result.count;
       }
