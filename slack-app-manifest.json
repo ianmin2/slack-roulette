@@ -1,0 +1,67 @@
+{
+    "display_information": {
+        "name": "PR Roulette",
+        "description": "Intelligent code review assignment with gamification",
+        "background_color": "#6366f1",
+        "long_description": "🎲 PR Roulette automates code review assignments by analyzing GitHub PRs, balancing workloads, and gamifying the review process.\r\n\r\n• Auto-detects PR links in channels\r\n• Smart reviewer selection based on expertise & availability\r\n• Tracks review stats and achievements\r\n• Weekly leaderboards and challenges\r\n\r\nCommands:\r\n• /pr-roulette help - Show available commands\r\n• /pr-roulette stats - View your review statistics\r\n• /pr-roulette leaderboard - See top reviewers\r\n• /pr-roulette assign <pr-url> @user - Manual assignment"
+    },
+    "features": {
+        "app_home": {
+            "home_tab_enabled": true,
+            "messages_tab_enabled": true,
+            "messages_tab_read_only_enabled": false
+        },
+        "bot_user": {
+            "display_name": "PR Roulette",
+            "always_online": true
+        },
+        "slash_commands": [
+            {
+                "command": "/pr-roulette",
+                "url": "https://pr-roulette.bixbyte.io/api/slack/commands",
+                "description": "Manage PR review assignments",
+                "usage_hint": "[help|stats|assign|leaderboard|config]",
+                "should_escape": false
+            }
+        ]
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "app_mentions:read",
+                "channels:history",
+                "channels:read",
+                "chat:write",
+                "commands",
+                "groups:history",
+                "groups:read",
+                "im:history",
+                "im:read",
+                "im:write",
+                "mpim:history",
+                "reactions:write",
+                "users:read",
+                "users:read.email"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "request_url": "https://pr-roulette.bixbyte.io/api/slack/events",
+            "bot_events": [
+                "app_home_opened",
+                "app_mention",
+                "message.channels",
+                "message.groups",
+                "message.im"
+            ]
+        },
+        "interactivity": {
+            "is_enabled": true,
+            "request_url": "https://pr-roulette.bixbyte.io/api/slack/interactions"
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "token_rotation_enabled": false
+    }
+}

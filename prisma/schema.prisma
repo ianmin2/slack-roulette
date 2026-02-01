@@ -1,0 +1,505 @@
+// PR Roulette - Prisma Schema
+// Following: ENGINEERING_STANDARDS.md
+// - UUIDs for external IDs
+// - Soft deletes (deletedAt) for audit trails
+// - Indexed foreign keys
+// - Proper relations (no N+1)
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  ADMIN
+  TEAM_LEAD
+  DEVELOPER
+  VIEWER
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  BUSY
+  VACATION
+  UNAVAILABLE
+}
+
+enum AssignmentStatus {
+  PENDING
+  ASSIGNED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  COMPLETED
+  SKIPPED
+  EXPIRED
+}
+
+enum PRComplexity {
+  TRIVIAL   // < 10 lines, docs only
+  SMALL     // 10-50 lines, single feature
+  MEDIUM    // 50-200 lines, multiple files
+  LARGE     // 200+ lines, significant changes
+  COMPLEX   // Architecture changes, new dependencies
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id              String             @id @default(uuid())
+  slackId         String             @unique @map("slack_id")
+  githubUsername  String?            @map("github_username")
+  email           String?
+  displayName     String             @map("display_name")
+  avatarUrl       String?            @map("avatar_url")
+  role            UserRole           @default(DEVELOPER)
+  timezone        String             @default("UTC")
+
+  // Availability
+  availabilityStatus AvailabilityStatus @default(AVAILABLE) @map("availability_status")
+  workingHoursStart  String?            @map("working_hours_start") // "09:00"
+  workingHoursEnd    String?            @map("working_hours_end")   // "18:00"
+  workingDays        String[]           @default(["monday", "tuesday", "wednesday", "thursday", "friday"]) @map("working_days")
+
+  // Notification preferences (JSON for flexibility)
+  notificationPrefs  Json?              @default("{}") @map("notification_prefs")
+
+  // Timestamps
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  deletedAt       DateTime?          @map("deleted_at")
+
+  // Relations
+  skills              UserSkill[]
+  repositoryReviewers RepositoryReviewer[]
+  assignmentsAsAuthor Assignment[]       @relation("AuthorAssignments")
+  assignmentsAsReviewer Assignment[]     @relation("ReviewerAssignments")
+  statistics          Statistics[]
+  achievements        UserAchievement[]
+  challengeProgress   ChallengeProgress[]
+  challengesCreated   Challenge[]        @relation("ChallengeCreator")
+  weeklyGoals         WeeklyGoal[]
+
+  @@index([slackId])
+  @@index([githubUsername])
+  @@index([email])
+  @@index([deletedAt]) // For filtering active users
+  @@index([availabilityStatus]) // For filtering available reviewers
+  @@map("users")
+}
+
+// ============================================================================
+// SKILLS
+// ============================================================================
+
+model Skill {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  category    String?     // "frontend", "backend", "devops", etc.
+
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  users       UserSkill[]
+
+  @@map("skills")
+}
+
+model UserSkill {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  skillId     String   @map("skill_id")
+  proficiency Int      @default(1) // 1-5 scale
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill       Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, skillId])
+  @@index([userId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+// ============================================================================
+// REPOSITORIES
+// ============================================================================
+
+model Repository {
+  id                    String    @id @default(uuid())
+  name                  String
+  fullName              String    @unique @map("full_name") // "owner/repo"
+  url                   String
+  owner                 String
+  language              String?
+  description           String?
+
+  // Assignment settings
+  autoAssignment        Boolean   @default(true) @map("auto_assignment")
+  minReviewers          Int       @default(1) @map("min_reviewers")
+  maxReviewers          Int       @default(2) @map("max_reviewers")
+  requireSeniorComplex  Boolean   @default(true) @map("require_senior_complex")
+  complexityMultiplier  Float     @default(1.0) @map("complexity_multiplier")
+
+  // Filters (stored as JSON arrays)
+  branchFilters         String[]  @default(["main", "master", "develop"]) @map("branch_filters")
+  excludedPatterns      String[]  @default(["package-lock.json", "yarn.lock", "*.md"]) @map("excluded_patterns")
+
+  // Timestamps
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  deletedAt             DateTime? @map("deleted_at")
+
+  // Relations
+  reviewers             RepositoryReviewer[]
+  assignments           Assignment[]
+  statistics            Statistics[]
+  challenges            Challenge[]
+
+  @@index([fullName])
+  @@index([owner])
+  @@index([deletedAt]) // For filtering active repositories
+  @@index([autoAssignment, deletedAt]) // For auto-assignment eligible repos
+  @@map("repositories")
+}
+
+// ============================================================================
+// REPOSITORY <-> REVIEWER (Junction with per-repo settings)
+// ============================================================================
+
+model RepositoryReviewer {
+  id              String     @id @default(uuid())
+  userId          String     @map("user_id")
+  repositoryId    String     @map("repository_id")
+
+  // Per-repo reviewer settings
+  weight          Float      @default(1.0)       // 0.5 (junior) to 2.0 (senior)
+  maxConcurrent   Int        @default(5) @map("max_concurrent")
+  isActive        Boolean    @default(true) @map("is_active")
+
+  // Timestamps
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository      Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([userId])
+  @@index([repositoryId])
+  @@map("repository_reviewers")
+}
+
+// ============================================================================
+// ASSIGNMENTS (PR Review Assignments)
+// ============================================================================
+
+model Assignment {
+  id                String           @id @default(uuid())
+
+  // PR Details
+  prUrl             String           @map("pr_url")
+  prNumber          Int              @map("pr_number")
+  prTitle           String?          @map("pr_title")
+
+  // Repository
+  repositoryId      String           @map("repository_id")
+  repository        Repository       @relation(fields: [repositoryId], references: [id])
+
+  // Author (PR creator)
+  authorId          String           @map("author_id")
+  author            User             @relation("AuthorAssignments", fields: [authorId], references: [id])
+
+  // Assigned reviewer
+  reviewerId        String?          @map("reviewer_id")
+  reviewer          User?            @relation("ReviewerAssignments", fields: [reviewerId], references: [id])
+
+  // PR Analysis
+  effortScore       Float?           @map("effort_score")
+  complexity        PRComplexity     @default(MEDIUM)
+  linesChanged      Int?             @map("lines_changed")
+  filesChanged      Int?             @map("files_changed")
+  skillsRequired    String[]         @default([]) @map("skills_required")
+
+  // Status tracking
+  status            AssignmentStatus @default(PENDING)
+
+  // Sync status
+  githubSynced      Boolean          @default(false) @map("github_synced")
+  slackNotified     Boolean          @default(false) @map("slack_notified")
+
+  // Slack context
+  slackChannelId    String?          @map("slack_channel_id")
+  slackMessageTs    String?          @map("slack_message_ts")
+
+  // Timestamps
+  assignedAt        DateTime?        @map("assigned_at")
+  firstResponseAt   DateTime?        @map("first_response_at")
+  completedAt       DateTime?        @map("completed_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  @@unique([repositoryId, prNumber])
+  @@index([repositoryId])
+  @@index([authorId])
+  @@index([reviewerId])
+  @@index([status])
+  @@index([prUrl])
+  @@index([createdAt])
+  @@index([assignedAt])
+  @@index([status, createdAt]) // For filtering recent by status
+  @@map("assignments")
+}
+
+// ============================================================================
+// STATISTICS (Aggregated metrics per user per repo per period)
+// ============================================================================
+
+model Statistics {
+  id                  String    @id @default(uuid())
+
+  userId              String    @map("user_id")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  repositoryId        String?   @map("repository_id") // null = all repos
+  repository          Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  period              String    // "2026-W05", "2026-01", "2026"
+  periodType          String    @map("period_type") // "week", "month", "year", "all_time"
+
+  // Counts
+  assigned            Int       @default(0)
+  completed           Int       @default(0)
+  skipped             Int       @default(0)
+
+  // Times (in minutes)
+  avgResponseTime     Int?      @map("avg_response_time")
+  avgCompletionTime   Int?      @map("avg_completion_time")
+  fastestResponse     Int?      @map("fastest_response")
+
+  // Quality metrics
+  qualityComments     Int       @default(0) @map("quality_comments")
+  bugsCaught          Int       @default(0) @map("bugs_caught")
+  approvals           Int       @default(0)
+  rejections          Int       @default(0)
+
+  // Gamification
+  points              Int       @default(0)
+  streak              Int       @default(0)
+
+  // Skills used (JSON: { "React": 5, "TypeScript": 3 })
+  skillsUsed          Json      @default("{}") @map("skills_used")
+
+  // Timestamps
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, repositoryId, period])
+  @@index([userId])
+  @@index([repositoryId])
+  @@index([period])
+  @@index([periodType, period]) // For filtering by period type
+  @@index([userId, periodType]) // For user history queries
+  @@map("statistics")
+}
+
+// ============================================================================
+// ACHIEVEMENTS
+// ============================================================================
+
+model Achievement {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  displayName String            @map("display_name")
+  description String
+  icon        String            // emoji or icon name
+  criteria    Json              // { "type": "avg_response_time", "threshold": 60 }
+  category    String?           // "speed", "quality", "collaboration"
+
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  users       UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  achievementId String      @map("achievement_id")
+
+  earnedAt      DateTime    @default(now()) @map("earned_at")
+  notified      Boolean     @default(false)
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@index([achievementId])
+  @@map("user_achievements")
+}
+
+// ============================================================================
+// CHALLENGES (Weekly Goals & Team Challenges)
+// ============================================================================
+
+enum ChallengeType {
+  REVIEWS_COMPLETED      // Complete N reviews
+  FAST_REVIEWS           // Complete N reviews in under X minutes
+  STREAK_DAYS            // Maintain a streak for N days
+  POINTS_EARNED          // Earn N points
+  TEAM_REVIEWS           // Team completes N reviews collectively
+  RESPONSE_TIME_AVG      // Keep average response time under X minutes
+  ZERO_PENDING           // End the period with zero pending reviews
+}
+
+enum ChallengeScope {
+  INDIVIDUAL
+  TEAM
+  REPOSITORY
+}
+
+enum RewardType {
+  POINTS
+  BADGE
+  ACHIEVEMENT
+}
+
+model Challenge {
+  id            String          @id @default(uuid())
+  name          String
+  displayName   String          @map("display_name")
+  description   String
+  type          ChallengeType
+  scope         ChallengeScope  @default(INDIVIDUAL)
+
+  // Target & criteria
+  target        Int             // The number to reach
+  targetMeta    Json?           @map("target_meta") // Extra criteria (e.g., { maxMinutes: 30 } for FAST_REVIEWS)
+
+  // Reward
+  rewardType    RewardType      @default(POINTS) @map("reward_type")
+  rewardValue   Int             @default(0) @map("reward_value")
+  rewardDesc    String?         @map("reward_desc")
+
+  // Timing
+  startDate     DateTime        @map("start_date")
+  endDate       DateTime        @map("end_date")
+
+  // Scope (optional repository restriction)
+  repositoryId  String?         @map("repository_id")
+  repository    Repository?     @relation(fields: [repositoryId], references: [id])
+
+  // Status
+  isActive      Boolean         @default(true) @map("is_active")
+  isRecurring   Boolean         @default(false) @map("is_recurring") // Weekly rotation
+
+  // Metadata
+  createdById   String?         @map("created_by_id")
+  createdBy     User?           @relation("ChallengeCreator", fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  progress      ChallengeProgress[]
+
+  @@index([startDate, endDate])
+  @@index([isActive])
+  @@index([type])
+  @@index([repositoryId])
+  @@map("challenges")
+}
+
+model ChallengeProgress {
+  id            String     @id @default(uuid())
+
+  challengeId   String     @map("challenge_id")
+  challenge     Challenge  @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  // For individual/team tracking
+  userId        String?    @map("user_id") // null for team challenges
+  user          User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Progress
+  currentValue  Int        @default(0) @map("current_value")
+  isCompleted   Boolean    @default(false) @map("is_completed")
+  completedAt   DateTime?  @map("completed_at")
+  rewardClaimed Boolean    @default(false) @map("reward_claimed")
+
+  // Timestamps
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  @@unique([challengeId, userId])
+  @@index([challengeId])
+  @@index([userId])
+  @@index([isCompleted])
+  @@map("challenge_progress")
+}
+
+// ============================================================================
+// WEEKLY GOALS (Personal user targets)
+// ============================================================================
+
+model WeeklyGoal {
+  id                        String   @id @default(uuid())
+
+  userId                    String   @map("user_id")
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  weekStart                 DateTime @map("week_start")
+
+  // Targets
+  targetReviews             Int      @default(5) @map("target_reviews")
+  targetPoints              Int      @default(100) @map("target_points")
+  targetAvgResponseMinutes  Int?     @map("target_avg_response_minutes")
+
+  // Current progress
+  currentReviews            Int      @default(0) @map("current_reviews")
+  currentPoints             Int      @default(0) @map("current_points")
+  currentAvgResponseMinutes Int?     @map("current_avg_response_minutes")
+
+  // Status
+  isAchieved                Boolean  @default(false) @map("is_achieved")
+  notified                  Boolean  @default(false)
+
+  // Timestamps
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, weekStart])
+  @@index([userId])
+  @@index([weekStart])
+  @@map("weekly_goals")
+}
+
+// ============================================================================
+// AUDIT LOG (for tracking changes)
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+
+  userId      String?  @map("user_id") // who made the change
+  action      String   // "create", "update", "delete"
+  entityType  String   @map("entity_type") // "assignment", "repository", etc.
+  entityId    String   @map("entity_id")
+  changes     Json?    // { before: {}, after: {} }
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

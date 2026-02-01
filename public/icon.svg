@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366F1"/>
+      <stop offset="100%" style="stop-color:#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="dice" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFFFFF"/>
+      <stop offset="100%" style="stop-color:#E0E7FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bg)"/>
+
+  <!-- Dice body (3D isometric style) -->
+  <g transform="translate(256, 256)">
+    <!-- Top face -->
+    <polygon points="0,-100 86,-50 0,0 -86,-50" fill="url(#dice)" stroke="#6366F1" stroke-width="3"/>
+    <!-- Left face -->
+    <polygon points="-86,-50 0,0 0,100 -86,50" fill="#C7D2FE" stroke="#6366F1" stroke-width="3"/>
+    <!-- Right face -->
+    <polygon points="86,-50 0,0 0,100 86,50" fill="#A5B4FC" stroke="#6366F1" stroke-width="3"/>
+
+    <!-- PR merge icon on top face -->
+    <g transform="translate(0, -50) scale(0.8)">
+      <!-- Branch lines -->
+      <circle cx="-20" cy="-25" r="8" fill="#6366F1"/>
+      <circle cx="20" cy="-25" r="8" fill="#6366F1"/>
+      <circle cx="0" cy="25" r="10" fill="#10B981"/>
+      <line x1="-20" y1="-17" x2="-10" y2="10" stroke="#6366F1" stroke-width="4" stroke-linecap="round"/>
+      <line x1="20" y1="-17" x2="10" y2="10" stroke="#6366F1" stroke-width="4" stroke-linecap="round"/>
+      <line x1="-10" y1="10" x2="0" y2="15" stroke="#6366F1" stroke-width="4" stroke-linecap="round"/>
+      <line x1="10" y1="10" x2="0" y2="15" stroke="#6366F1" stroke-width="4" stroke-linecap="round"/>
+    </g>
+
+    <!-- Dots on left face -->
+    <circle cx="-43" cy="0" r="8" fill="#6366F1"/>
+    <circle cx="-43" cy="30" r="8" fill="#6366F1"/>
+
+    <!-- Dots on right face -->
+    <circle cx="43" cy="-10" r="8" fill="#6366F1"/>
+    <circle cx="43" cy="20" r="8" fill="#6366F1"/>
+    <circle cx="43" cy="50" r="8" fill="#6366F1"/>
+  </g>
+
+  <!-- Sparkle accents -->
+  <g fill="#FCD34D">
+    <circle cx="380" cy="100" r="8"/>
+    <circle cx="400" cy="130" r="5"/>
+    <circle cx="120" cy="400" r="6"/>
+    <circle cx="100" cy="370" r="4"/>
+  </g>
+</svg>
