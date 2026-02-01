@@ -54,6 +54,10 @@ pm2 start ecosystem.config.js --env production
 echo "📊 PM2 Status:"
 pm2 list
 
+# Save PM2 process list for auto-restart on reboot
+echo "💾 Saving PM2 process list..."
+pm2 save
+
 echo ""
 echo "✅ Slack Roulette started successfully!"
 echo "📝 Logs: pm2 logs slack-roulette"

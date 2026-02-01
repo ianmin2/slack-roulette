@@ -13,6 +13,23 @@ PR Roulette automates code review assignments by analyzing GitHub PRs, balancing
 - **Admin Panel**: Role-based access control for managing reviewers and repositories
 - **Analytics**: Comprehensive metrics on review times, bottlenecks, and team performance
 
+## Quick Start
+
+```bash
+# Clone and enter directory
+git clone https://github.com/ianmin2/slack-roulette.git
+cd slack-roulette
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your DATABASE_URL, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
+
+# Run the startup script (installs, migrates, builds, starts with PM2)
+./startup.sh
+```
+
+That's it. The app will be running on port 3000 with PM2.
+
 ## Table of Contents
 
 - [Installation](#installation)
