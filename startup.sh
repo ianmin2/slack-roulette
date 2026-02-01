@@ -42,9 +42,14 @@ npx prisma migrate deploy
 echo "🏗️  Building application..."
 npm run build
 
+# Stop existing PM2 process if running
+echo "🛑 Stopping existing PM2 process (if any)..."
+pm2 stop slack-roulette 2>/dev/null || true
+pm2 delete slack-roulette 2>/dev/null || true
+
 # Start with PM2
 echo "🔄 Starting application with PM2..."
-pm2 start ecosystem.config.js --env production || pm2 restart ecosystem.config.js --env production
+pm2 start ecosystem.config.js --env production
 
 echo "📊 PM2 Status:"
 pm2 list
