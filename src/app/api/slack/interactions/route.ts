@@ -13,6 +13,23 @@ import { db } from '@/lib/db';
 import { publishAppHome } from '@/lib/slack/views/app-home';
 import { verifySlackSignature, getBotToken } from '@/lib/slack/security';
 import { createLogger } from '@/lib/utils/logger';
+import {
+  buildEditRepositoryModal,
+  parseEditRepositorySubmission,
+} from '@/lib/slack/views/modals/edit-repository';
+import {
+  buildEditUserModal,
+  parseEditUserSubmission,
+} from '@/lib/slack/views/modals/edit-user';
+import {
+  buildEditRuleModal,
+  parseEditRuleSubmission,
+} from '@/lib/slack/views/modals/edit-rule';
+import {
+  buildConfirmModal,
+  parseConfirmState,
+  type ConfirmModalState,
+} from '@/lib/slack/views/modals/confirm';
 
 const log = createLogger('slack:interactions');
 
@@ -59,12 +76,40 @@ const buildManageReposModal = async () => {
     where: { deletedAt: null },
     orderBy: { name: 'asc' },
     take: 20,
+    include: {
+      _count: {
+        select: {
+          assignments: {
+            where: { status: { in: ['PENDING', 'ASSIGNED', 'IN_REVIEW', 'CHANGES_REQUESTED'] } },
+          },
+        },
+      },
+    },
   });
 
-  const repoOptions = repos.map(r => ({
-    text: { type: 'plain_text' as const, text: r.fullName },
-    value: r.id,
-  }));
+  const repoBlocks = repos.flatMap((r) => [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${r.fullName}*\nAuto-assign: ${r.autoAssignment ? '✅' : '❌'} | Active PRs: ${r._count.assignments}`,
+      },
+      accessory: {
+        type: 'overflow',
+        action_id: `repo_overflow_${r.id}`,
+        options: [
+          {
+            text: { type: 'plain_text', text: '✏️ Edit Settings' },
+            value: `edit_${r.id}`,
+          },
+          {
+            text: { type: 'plain_text', text: '🗑️ Remove' },
+            value: `remove_${r.id}`,
+          },
+        ],
+      },
+    },
+  ]);
 
   return {
     type: 'modal',
@@ -84,47 +129,27 @@ const buildManageReposModal = async () => {
           type: 'mrkdwn',
           text: `*${repos.length} repositories configured*`,
         },
-      },
-      {
-        type: 'divider',
-      },
-      ...(repos.length > 0 ? [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Select a repository to configure:',
-          },
-          accessory: {
-            type: 'static_select',
-            placeholder: {
-              type: 'plain_text',
-              text: 'Select repository',
-            },
-            options: repoOptions,
-            action_id: 'select_repo_to_configure',
-          },
-        },
-      ] : []),
-      {
-        type: 'divider',
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: 'Add a new repository:',
-        },
         accessory: {
           type: 'button',
           text: {
             type: 'plain_text',
-            text: 'Add Repository',
+            text: '➕ Add Repository',
           },
           style: 'primary',
           action_id: 'open_add_repo_modal',
         },
       },
+      {
+        type: 'divider',
+      },
+      ...repoBlocks,
+      ...(repos.length === 0 ? [{
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '_No repositories configured yet. Add one to get started!_',
+        },
+      }] : []),
     ],
   };
 };
@@ -511,6 +536,121 @@ const handleBlockActions = async (payload: {
     return;
   }
 
+  // Repository overflow menu
+  if (actionId.startsWith('repo_overflow_')) {
+    const selectedValue = action.selected_option?.value;
+    if (!selectedValue) return;
+
+    if (selectedValue.startsWith('edit_')) {
+      const repoId = selectedValue.replace('edit_', '');
+      const repo = await db.repository.findUnique({ where: { id: repoId } });
+      if (repo) {
+        const modalData = buildEditRepositoryModal(repo, payload.trigger_id);
+        await openModal(payload.trigger_id, modalData.view);
+      }
+    } else if (selectedValue.startsWith('remove_')) {
+      const repoId = selectedValue.replace('remove_', '');
+      const repo = await db.repository.findUnique({
+        where: { id: repoId },
+        include: {
+          _count: {
+            select: {
+              assignments: {
+                where: { status: { in: ['PENDING', 'ASSIGNED', 'IN_REVIEW', 'CHANGES_REQUESTED'] } },
+              },
+            },
+          },
+        },
+      });
+      if (repo) {
+        const state: ConfirmModalState = {
+          action: 'remove_repository',
+          entityId: repoId,
+          entityName: repo.fullName,
+          impact: repo._count.assignments > 0
+            ? `${repo._count.assignments} active PRs will be untracked`
+            : undefined,
+        };
+        const modalData = buildConfirmModal(state, payload.trigger_id);
+        await openModal(payload.trigger_id, modalData.view);
+      }
+    }
+    return;
+  }
+
+  // Admin edit user with full modal
+  if (actionId.startsWith('admin_edit_user_')) {
+    const userId = actionId.replace('admin_edit_user_', '');
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      include: { repositoryReviewers: true },
+    });
+    const skills = await db.skill.findMany({ orderBy: { name: 'asc' } });
+    if (user) {
+      const modalData = buildEditUserModal(user, payload.trigger_id, skills);
+      await openModal(payload.trigger_id, modalData.view);
+    }
+    return;
+  }
+
+  // Admin manage rules
+  if (actionId === 'admin_manage_rules') {
+    const rules = await db.problemRule.findMany({ orderBy: { name: 'asc' } });
+    const ruleBlocks = rules.flatMap((r) => [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${r.name}*\n${r.description ?? 'No description'}\nSeverity: ${r.severity} | Active: ${r.isActive ? '✅' : '❌'}`,
+        },
+        accessory: {
+          type: 'button',
+          text: { type: 'plain_text', text: 'Edit' },
+          action_id: `edit_rule_${r.id}`,
+        },
+      },
+    ]);
+
+    const modal = {
+      type: 'modal',
+      callback_id: 'manage_rules_modal',
+      title: { type: 'plain_text', text: 'Problem Rules' },
+      close: { type: 'plain_text', text: 'Close' },
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*${rules.length} rules configured*` },
+          accessory: {
+            type: 'button',
+            text: { type: 'plain_text', text: '➕ Add Rule' },
+            style: 'primary',
+            action_id: 'open_add_rule_modal',
+          },
+        },
+        { type: 'divider' },
+        ...ruleBlocks,
+      ],
+    };
+    await openModal(payload.trigger_id, modal);
+    return;
+  }
+
+  if (actionId === 'open_add_rule_modal') {
+    const modalData = buildEditRuleModal(null, payload.trigger_id);
+    await openModal(payload.trigger_id, modalData.view);
+    return;
+  }
+
+  if (actionId.startsWith('edit_rule_')) {
+    const ruleId = actionId.replace('edit_rule_', '');
+    const rule = await db.problemRule.findUnique({ where: { id: ruleId } });
+    if (rule) {
+      const modalData = buildEditRuleModal(rule, payload.trigger_id);
+      await openModal(payload.trigger_id, modalData.view);
+    }
+    return;
+  }
+
   log.debug('Unhandled action', { actionId });
 };
 
@@ -617,6 +757,118 @@ const handleViewSubmission = async (payload: {
     // Refresh App Home
     await publishAppHome(payload.user.id);
 
+    return null;
+  }
+
+  // Edit Repository modal
+  if (callbackId === 'edit_repository_modal') {
+    const metadata = JSON.parse(payload.view.private_metadata ?? '{}');
+    const repoId = metadata.repositoryId;
+    if (!repoId) return null;
+
+    const data = parseEditRepositorySubmission(values);
+
+    await db.repository.update({
+      where: { id: repoId },
+      data: {
+        autoAssignment: data.autoAssignment,
+        minReviewers: data.minReviewers,
+        maxReviewers: data.maxReviewers,
+        requireSeniorComplex: data.requireSeniorComplex,
+        complexityMultiplier: data.complexityMultiplier,
+      },
+    });
+
+    log.info('Repository updated via modal', { repoId });
+    await publishAppHome(payload.user.id);
+    return null;
+  }
+
+  // Edit User modal (admin)
+  if (callbackId === 'edit_user_modal') {
+    const metadata = JSON.parse(payload.view.private_metadata ?? '{}');
+    const userId = metadata.userId;
+    if (!userId) return null;
+
+    const data = parseEditUserSubmission(values);
+
+    // Update user role
+    await db.user.update({
+      where: { id: userId },
+      data: { role: data.role },
+    });
+
+    // Update reviewer settings for all repos
+    await db.repositoryReviewer.updateMany({
+      where: { userId },
+      data: {
+        weight: data.weight,
+        maxConcurrent: data.maxConcurrent,
+      },
+    });
+
+    // Update skills if provided
+    if (data.skillIds.length > 0) {
+      // Remove existing skills
+      await db.userSkill.deleteMany({ where: { userId } });
+      // Add new skills
+      await db.userSkill.createMany({
+        data: data.skillIds.map((skillId) => ({ userId, skillId })),
+      });
+    }
+
+    log.info('User updated via admin modal', { userId, role: data.role });
+    await publishAppHome(payload.user.id);
+    return null;
+  }
+
+  // Edit Rule modal
+  if (callbackId === 'edit_rule_modal') {
+    const metadata = JSON.parse(payload.view.private_metadata ?? '{}');
+    const ruleId = metadata.ruleId;
+    const data = parseEditRuleSubmission(values);
+
+    if (!data.name) {
+      return {
+        response_action: 'errors',
+        errors: { name: 'Rule name is required' },
+      };
+    }
+
+    if (ruleId) {
+      // Update existing rule
+      await db.problemRule.update({
+        where: { id: ruleId },
+        data,
+      });
+      log.info('Problem rule updated', { ruleId, name: data.name });
+    } else {
+      // Create new rule
+      await db.problemRule.create({ data });
+      log.info('Problem rule created', { name: data.name });
+    }
+
+    await publishAppHome(payload.user.id);
+    return null;
+  }
+
+  // Confirm Action modal
+  if (callbackId === 'confirm_action_modal') {
+    const state = parseConfirmState(payload.view.private_metadata ?? '{}');
+
+    if (state.action === 'remove_repository') {
+      // Soft delete repository
+      await db.repository.update({
+        where: { id: state.entityId },
+        data: { deletedAt: new Date() },
+      });
+      log.info('Repository removed', { repoId: state.entityId, name: state.entityName });
+    } else if (state.action === 'delete_rule') {
+      await db.problemRule.delete({ where: { id: state.entityId } });
+      log.info('Problem rule deleted', { ruleId: state.entityId });
+    }
+
+    await publishAppHome(payload.user.id);
     return null;
   }
 

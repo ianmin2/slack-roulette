@@ -6,6 +6,7 @@ import { getPullRequest, getPullRequestFiles, addReviewer } from '@/lib/github/c
 import { getUserInfo, postMessage, addReaction } from '@/lib/slack/client';
 import { verifySlackSignature } from '@/lib/slack/security';
 import { publishAppHome } from '@/lib/slack/views/app-home';
+import { handleReactionEvent } from '@/lib/slack/reactions';
 import { selectReviewer, formatSelectionSummary } from '@/lib/assignment/selector';
 import { recordAssignment } from '@/lib/stats';
 import { createLogger } from '@/lib/utils/logger';
@@ -373,6 +374,13 @@ export async function POST(request: NextRequest) {
     if (event.type === 'app_home_opened') {
       // Refresh App Home when user opens it
       publishAppHome(event.user).catch((err) => log.error('App Home publish failed', err instanceof Error ? err : undefined));
+    }
+
+    if (event.type === 'reaction_added' || event.type === 'reaction_removed') {
+      // Process reaction events for status tracking
+      handleReactionEvent(event).catch((err) =>
+        log.error('Reaction event handler failed', err instanceof Error ? err : undefined)
+      );
     }
   }
 

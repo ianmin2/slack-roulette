@@ -242,11 +242,22 @@ model Assignment {
   slackMessageTs    String?          @map("slack_message_ts")
 
   // Timestamps
-  assignedAt        DateTime?        @map("assigned_at")
-  firstResponseAt   DateTime?        @map("first_response_at")
-  completedAt       DateTime?        @map("completed_at")
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  assignedAt            DateTime?        @map("assigned_at")
+  firstResponseAt       DateTime?        @map("first_response_at")
+  firstReviewActivityAt DateTime?        @map("first_review_activity_at") // When reviewer first reacted
+  completedAt           DateTime?        @map("completed_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  // Review tracking (derived from reactions)
+  rejectionCount        Int              @default(0) @map("rejection_count")
+  reviewCycleCount      Int              @default(0) @map("review_cycle_count") // 👀→❌→👀 cycles
+  reviewerChangeCount   Int              @default(0) @map("reviewer_change_count")
+  problemSignals        String[]         @default([]) @map("problem_signals")
+
+  // Relations for reaction tracking
+  reactionEvents        ReactionEvent[]
+  problems              AssignmentProblem[]
 
   @@unique([repositoryId, prNumber])
   @@index([repositoryId])
@@ -257,6 +268,7 @@ model Assignment {
   @@index([createdAt])
   @@index([assignedAt])
   @@index([status, createdAt]) // For filtering recent by status
+  @@index([slackChannelId, slackMessageTs]) // For reaction lookup
   @@map("assignments")
 }
 
@@ -502,4 +514,121 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ============================================================================
+// REACTION TRACKING
+// ============================================================================
+
+enum ReactionAction {
+  ADDED
+  REMOVED
+}
+
+// Immutable audit log of all reactions on assignment messages
+model ReactionEvent {
+  id            String         @id @default(uuid())
+
+  assignmentId  String         @map("assignment_id")
+  assignment    Assignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  userId        String         @map("user_id") // Slack user who reacted
+  emoji         String         // "eyes", "white_check_mark", etc.
+  action        ReactionAction // ADDED or REMOVED
+
+  // Was this the assigned reviewer?
+  isReviewer    Boolean        @default(false) @map("is_reviewer")
+
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  @@index([assignmentId])
+  @@index([userId])
+  @@index([emoji])
+  @@index([createdAt])
+  @@map("reaction_events")
+}
+
+// ============================================================================
+// STATUS REACTION MAPPING (Configurable emoji → status)
+// ============================================================================
+
+model StatusReactionMapping {
+  id            String           @id @default(uuid())
+
+  status        AssignmentStatus // Which status this maps to
+  emojis        String[]         // Array of emoji names that trigger this status
+  displayEmoji  String           @map("display_emoji") // Shown in UI (e.g., "👀")
+  sortOrder     Int              @default(0) @map("sort_order") // Priority when multiple match
+  isActive      Boolean          @default(true) @map("is_active")
+
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  @@unique([status])
+  @@index([isActive])
+  @@map("status_reaction_mappings")
+}
+
+// ============================================================================
+// PROBLEM DETECTION
+// ============================================================================
+
+enum ProblemSeverity {
+  WARNING
+  PROBLEM
+  CRITICAL
+}
+
+enum ProblemConditionType {
+  NO_ACTIVITY_FOR       // Hours since last reaction
+  REJECTION_COUNT_GTE   // Number of rejections >= N
+  REVIEWER_CHANGES_GTE  // Number of reassignments >= N
+  TOTAL_AGE_GTE         // PR open for >= N hours
+}
+
+model ProblemRule {
+  id            String          @id @default(uuid())
+
+  name          String          @unique
+  description   String?
+  severity      ProblemSeverity @default(PROBLEM)
+
+  // Condition
+  conditionType  ProblemConditionType @map("condition_type")
+  conditionValue Int                  @map("condition_value") // The threshold
+
+  // Notification
+  autoNotify    Boolean         @default(true) @map("auto_notify")
+  isActive      Boolean         @default(true) @map("is_active")
+
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  problems      AssignmentProblem[]
+
+  @@index([isActive])
+  @@index([severity])
+  @@map("problem_rules")
+}
+
+model AssignmentProblem {
+  id            String       @id @default(uuid())
+
+  assignmentId  String       @map("assignment_id")
+  assignment    Assignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  ruleId        String       @map("rule_id")
+  rule          ProblemRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  triggeredAt   DateTime     @default(now()) @map("triggered_at")
+  resolvedAt    DateTime?    @map("resolved_at")
+  notified      Boolean      @default(false)
+
+  @@unique([assignmentId, ruleId])
+  @@index([assignmentId])
+  @@index([ruleId])
+  @@index([triggeredAt])
+  @@index([resolvedAt])
+  @@map("assignment_problems")
 }
