@@ -7,6 +7,7 @@ import type { ProblemRule, ProblemSeverity, ProblemConditionType } from '@/gener
 
 export interface EditRuleModalState {
   ruleId?: string; // undefined = new rule
+  updatedAt?: string; // ISO string for optimistic locking (undefined for new rules)
 }
 
 const SEVERITY_OPTIONS: { text: string; value: ProblemSeverity }[] = [
@@ -42,7 +43,7 @@ export const buildEditRuleModal = (
     view: {
       type: 'modal',
       callback_id: 'edit_rule_modal',
-      private_metadata: JSON.stringify({ ruleId: rule?.id }),
+      private_metadata: JSON.stringify({ ruleId: rule?.id, updatedAt: rule?.updatedAt.toISOString() } satisfies EditRuleModalState),
       title: {
         type: 'plain_text',
         text: isNew ? 'Create Rule' : 'Edit Rule',

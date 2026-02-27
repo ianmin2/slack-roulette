@@ -7,6 +7,7 @@ import type { User, UserRole } from '@/generated/prisma';
 
 export interface EditUserModalState {
   userId: string;
+  updatedAt: string; // ISO string for optimistic locking
 }
 
 const ROLE_OPTIONS: { text: string; value: UserRole }[] = [
@@ -43,7 +44,7 @@ export const buildEditUserModal = (
     view: {
       type: 'modal',
       callback_id: 'edit_user_modal',
-      private_metadata: JSON.stringify({ userId: user.id }),
+      private_metadata: JSON.stringify({ userId: user.id, updatedAt: user.updatedAt.toISOString() } satisfies EditUserModalState),
       title: {
         type: 'plain_text',
         text: 'Edit User',

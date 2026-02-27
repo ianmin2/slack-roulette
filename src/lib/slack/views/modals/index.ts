@@ -7,6 +7,11 @@ export { buildEditRepositoryModal, type EditRepositoryModalState } from './edit-
 export { buildEditUserModal, type EditUserModalState } from './edit-user';
 export { buildEditRuleModal, type EditRuleModalState } from './edit-rule';
 export { buildConfirmModal, type ConfirmModalState } from './confirm';
+export {
+  buildEditReactionMappingModal,
+  parseEditReactionMappingSubmission,
+  type EditReactionMappingModalState,
+} from './edit-reaction-mapping';
 
 // Modal callback IDs
 export const MODAL_CALLBACKS = {
@@ -14,6 +19,7 @@ export const MODAL_CALLBACKS = {
   EDIT_USER: 'edit_user_modal',
   EDIT_RULE: 'edit_rule_modal',
   CONFIRM_ACTION: 'confirm_action_modal',
+  EDIT_REACTION_MAPPING: 'edit_reaction_mapping_modal',
 } as const;
 
 // Action IDs for buttons/inputs

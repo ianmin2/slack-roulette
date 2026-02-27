@@ -5,6 +5,7 @@
 
 import { db } from '@/lib/db';
 import { publishAppHome } from '@/lib/slack/views/app-home';
+import { recordCompletionWithAchievements } from '@/lib/stats';
 import { createLogger } from '@/lib/utils/logger';
 import type { AssignmentStatus, ReactionAction } from '@/generated/prisma';
 
@@ -182,6 +183,24 @@ export const handleReactionEvent = async (event: ReactionEventPayload): Promise<
     newStatus,
     emoji,
   });
+
+  // Record stats, achievements, and challenge progress on review completion
+  if (newStatus === 'APPROVED' && assignment.reviewer) {
+    const responseTimeMinutes = assignment.firstReviewActivityAt
+      ? Math.round((Date.now() - assignment.firstReviewActivityAt.getTime()) / 60000)
+      : assignment.assignedAt
+        ? Math.round((Date.now() - assignment.assignedAt.getTime()) / 60000)
+        : null;
+
+    recordCompletionWithAchievements(
+      assignment.reviewer.id,
+      assignment.reviewer.slackId,
+      assignment.repositoryId,
+      responseTimeMinutes
+    ).catch((err) =>
+      log.error('Failed to record completion stats', err instanceof Error ? err : undefined)
+    );
+  }
 
   // Refresh App Home for affected users
   const usersToRefresh = [

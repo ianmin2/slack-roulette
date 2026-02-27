@@ -27,14 +27,29 @@ jest.mock('@/lib/slack/views/app-home', () => ({
   publishAppHome: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/lib/utils/logger', () => ({
-  createLogger: () => ({
+jest.mock('@/lib/utils/logger', () => {
+  const mockLogger = {
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
-  }),
-}));
+  };
+  return {
+    createLogger: () => mockLogger,
+    loggers: {
+      slack: mockLogger,
+      github: mockLogger,
+      db: mockLogger,
+      api: mockLogger,
+      admin: mockLogger,
+      digest: mockLogger,
+      assignment: mockLogger,
+      analytics: mockLogger,
+      challenges: mockLogger,
+      goals: mockLogger,
+    },
+  };
+});
 
 describe('reactions', () => {
   beforeEach(() => {

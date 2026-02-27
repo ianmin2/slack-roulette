@@ -20,13 +20,13 @@ export const buildConfirmModal = (
   const actionDescriptions: Record<string, { title: string; warning: string; buttonText: string; buttonStyle: string }> = {
     remove_repository: {
       title: 'Remove Repository',
-      warning: 'This will stop tracking PRs from this repository.',
+      warning: 'This will stop tracking PRs and expire all active assignments for this repository.',
       buttonText: 'Remove',
       buttonStyle: 'danger',
     },
     delete_user: {
       title: 'Remove User',
-      warning: 'This will remove the user from PR Roulette.',
+      warning: 'This will soft-delete the user, remove them from review pools, and expire their pending reviews.',
       buttonText: 'Remove',
       buttonStyle: 'danger',
     },
@@ -38,8 +38,14 @@ export const buildConfirmModal = (
     },
     reassign_reviews: {
       title: 'Reassign Reviews',
-      warning: 'This will reassign all pending reviews from this user.',
+      warning: 'This will reassign all pending reviews from this user to other eligible reviewers.',
       buttonText: 'Reassign',
+      buttonStyle: 'primary',
+    },
+    change_pr_channel: {
+      title: 'Change PR Channel',
+      warning: 'This will change where PR assignment notifications are posted. Existing threads will remain in the old channel.',
+      buttonText: 'Change',
       buttonStyle: 'primary',
     },
   };

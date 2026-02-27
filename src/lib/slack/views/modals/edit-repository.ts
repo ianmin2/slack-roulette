@@ -7,6 +7,7 @@ import type { Repository } from '@/generated/prisma';
 
 export interface EditRepositoryModalState {
   repositoryId: string;
+  updatedAt: string; // ISO string for optimistic locking
 }
 
 /**
@@ -20,7 +21,7 @@ export const buildEditRepositoryModal = (
   view: {
     type: 'modal',
     callback_id: 'edit_repository_modal',
-    private_metadata: JSON.stringify({ repositoryId: repo.id }),
+    private_metadata: JSON.stringify({ repositoryId: repo.id, updatedAt: repo.updatedAt.toISOString() } satisfies EditRepositoryModalState),
     title: {
       type: 'plain_text',
       text: 'Edit Repository',

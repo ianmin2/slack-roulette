@@ -14,6 +14,8 @@ import {
   generateUserGrowthReport,
   formatGrowthReportForSlack,
 } from '@/lib/analytics';
+import { selectReviewer } from '@/lib/assignment/selector';
+import { syncChannelMembers, formatSyncReport } from '@/lib/sync';
 import { createLogger } from '@/lib/utils/logger';
 
 const log = createLogger('slack:commands');
@@ -59,6 +61,11 @@ const handleHelp = (): string => {
 
 *Assignment*
 • \`/pr-roulette assign <pr-url> @user\` - Manually assign a reviewer
+• \`/pr-roulette reassign <pr-url>\` - Reassign to a new reviewer (admin)
+
+*Availability*
+• \`/pr-roulette availability\` - Check your current status
+• \`/pr-roulette availability [on|off|busy|vacation]\` - Set availability
 
 *Team Setup*
 • \`/pr-roulette add-reviewer @user <repo> [weight]\` - Add reviewer to repo pool
@@ -80,6 +87,9 @@ const handleHelp = (): string => {
 • \`/pr-roulette growth\` - Your personal growth and progress report
 • \`/pr-roulette growth @user\` - View another user's growth
 • \`/pr-roulette bottlenecks\` - Identify bottlenecks and overloaded areas
+
+*Admin*
+• \`/pr-roulette sync\` - Sync channel members to the user database
 
 _Post any GitHub PR link in a channel where I'm added, and I'll automatically detect it and assign a reviewer!_`;
 };
@@ -982,6 +992,156 @@ const getTrendEmoji = (change: number): string => {
 };
 
 /**
+ * Handle /pr-roulette availability [on|off|busy|vacation]
+ */
+const handleAvailability = async (args: string[], userId: string): Promise<string> => {
+  try {
+    const user = await db.user.findUnique({ where: { slackId: userId } });
+    if (!user) {
+      return `❌ You're not set up yet. Open the App Home to get started.`;
+    }
+
+    if (args.length === 0) {
+      const statusEmoji: Record<string, string> = {
+        AVAILABLE: '🟢', BUSY: '🟡', VACATION: '🏖️', UNAVAILABLE: '🔴',
+      };
+      return `Your availability: ${statusEmoji[user.availabilityStatus] ?? '⚪'} *${user.availabilityStatus}*\n\nUsage: \`/pr-roulette availability [on|off|busy|vacation]\``;
+    }
+
+    const arg = args[0].toLowerCase();
+    const statusMap: Record<string, string> = {
+      on: 'AVAILABLE', available: 'AVAILABLE',
+      off: 'UNAVAILABLE', unavailable: 'UNAVAILABLE',
+      busy: 'BUSY',
+      vacation: 'VACATION', holiday: 'VACATION',
+    };
+
+    const newStatus = statusMap[arg];
+    if (!newStatus) {
+      return `❌ Invalid status: \`${arg}\`\nValid options: \`on\`, \`off\`, \`busy\`, \`vacation\``;
+    }
+
+    await db.user.update({
+      where: { id: user.id },
+      data: { availabilityStatus: newStatus as 'AVAILABLE' | 'BUSY' | 'VACATION' | 'UNAVAILABLE' },
+    });
+
+    const statusEmoji: Record<string, string> = {
+      AVAILABLE: '🟢', BUSY: '🟡', VACATION: '🏖️', UNAVAILABLE: '🔴',
+    };
+
+    return `✅ Availability updated: ${statusEmoji[newStatus] ?? '⚪'} *${newStatus}*`;
+  } catch (error) {
+    log.error('Availability update failed', error instanceof Error ? error : undefined);
+    return `❌ Failed to update availability. Please try again.`;
+  }
+};
+
+/**
+ * Handle /pr-roulette reassign <pr-url>
+ */
+const handleReassign = async (args: string[], userId: string, channelId: string): Promise<string> => {
+  if (args.length < 1) {
+    return `Usage: \`/pr-roulette reassign <pr-url>\`\nExample: \`/pr-roulette reassign https://github.com/owner/repo/pull/123\``;
+  }
+
+  try {
+    // Check admin/team lead role
+    const executor = await db.user.findUnique({ where: { slackId: userId } });
+    if (!executor || !['ADMIN', 'TEAM_LEAD'].includes(executor.role)) {
+      return `❌ Only admins and team leads can reassign PRs.`;
+    }
+
+    // Parse PR URL
+    const prUrl = args[0];
+    const pr = parsePRUrl(prUrl);
+    if (!pr) {
+      return `❌ Invalid PR URL: \`${prUrl}\`\nExpected format: \`https://github.com/owner/repo/pull/123\``;
+    }
+
+    // Find the assignment
+    const repository = await db.repository.findUnique({ where: { fullName: pr.fullName } });
+    if (!repository) {
+      return `❌ Repository \`${pr.fullName}\` is not tracked.`;
+    }
+
+    const assignment = await db.assignment.findUnique({
+      where: { repositoryId_prNumber: { repositoryId: repository.id, prNumber: pr.prNumber } },
+      include: { reviewer: true, author: true },
+    });
+
+    if (!assignment) {
+      return `❌ No assignment found for \`${pr.fullName}#${pr.prNumber}\`.`;
+    }
+
+    // Select new reviewer using the assignment algorithm
+    const result = await selectReviewer({
+      authorId: assignment.authorId ?? '',
+      repositoryId: repository.id,
+      skillsRequired: assignment.skillsRequired,
+      complexity: assignment.complexity,
+      prNumber: assignment.prNumber,
+    });
+
+    if (!result.selected) {
+      return `❌ No eligible reviewers available for reassignment. ${result.reason}`;
+    }
+
+    const newReviewer = result.selected.user;
+
+    // Update assignment
+    await db.assignment.update({
+      where: { id: assignment.id },
+      data: {
+        reviewerId: newReviewer.id,
+        status: 'ASSIGNED',
+        assignedAt: new Date(),
+        reviewerChangeCount: { increment: 1 },
+      },
+    });
+    const githubSuccess = newReviewer.githubUsername
+      ? await addReviewer(pr.owner, pr.repo, pr.prNumber, [newReviewer.githubUsername])
+      : false;
+
+    // Notify in channel
+    await postMessage(
+      channelId,
+      `🔄 *Reassignment*\n\n` +
+        `<@${newReviewer.slackId}> is now assigned to review:\n` +
+        `*<${pr.url}|${pr.fullName}#${pr.prNumber}>*` +
+        (assignment.reviewer ? `\n_Previously assigned to <@${assignment.reviewer.slackId}>_` : '') +
+        (githubSuccess ? '\n✅ Updated on GitHub' : ''),
+      { unfurl_links: false }
+    );
+
+    return `✅ Reassigned *${pr.fullName}#${pr.prNumber}* to <@${newReviewer.slackId}>` +
+      (githubSuccess ? ' (updated on GitHub)' : '');
+  } catch (error) {
+    log.error('Reassign failed', error instanceof Error ? error : undefined);
+    return `❌ Failed to reassign. Please try again.`;
+  }
+};
+
+/**
+ * Handle /pr-roulette sync
+ */
+const handleSync = async (userId: string, channelId: string): Promise<string> => {
+  try {
+    // Check admin role
+    const executor = await db.user.findUnique({ where: { slackId: userId } });
+    if (!executor || executor.role !== 'ADMIN') {
+      return `❌ Only admins can trigger a sync.`;
+    }
+
+    const report = await syncChannelMembers(channelId);
+    return formatSyncReport(report);
+  } catch (error) {
+    log.error('Sync failed', error instanceof Error ? error : undefined);
+    return `❌ Channel sync failed. Please try again.`;
+  }
+};
+
+/**
  * Route command to handler
  */
 const routeCommand = async (cmd: SlackCommand): Promise<string> => {
@@ -1018,7 +1178,6 @@ const routeCommand = async (cmd: SlackCommand): Promise<string> => {
 
     case 'my-repos':
     case 'myrepos':
-    case 'profile':
       return handleMyRepos(cmd.user_id);
 
     case 'achievements':
@@ -1049,6 +1208,17 @@ const routeCommand = async (cmd: SlackCommand): Promise<string> => {
     case 'me':
     case 'whoami':
       return handleProfile(args, cmd.user_id);
+
+    case 'availability':
+    case 'available':
+    case 'status':
+      return handleAvailability(args, cmd.user_id);
+
+    case 'reassign':
+      return handleReassign(args, cmd.user_id, cmd.channel_id);
+
+    case 'sync':
+      return handleSync(cmd.user_id, cmd.channel_id);
 
     default:
       return `Unknown command: \`${subcommand}\`\nUse \`/pr-roulette help\` to see available commands.`;

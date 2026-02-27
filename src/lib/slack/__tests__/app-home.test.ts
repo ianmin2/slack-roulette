@@ -18,6 +18,9 @@ jest.mock('@/lib/db', () => ({
     userAchievement: {
       count: jest.fn(),
     },
+    assignmentProblem: {
+      count: jest.fn(),
+    },
     repository: {
       count: jest.fn(),
     },
@@ -26,6 +29,7 @@ jest.mock('@/lib/db', () => ({
 
 jest.mock('@/lib/stats', () => ({
   getUserStatsSummary: jest.fn(),
+  getLeaderboard: jest.fn().mockResolvedValue([]),
 }));
 
 import { db } from '@/lib/db';
@@ -33,6 +37,19 @@ import { getUserStatsSummary } from '@/lib/stats';
 
 const mockDb = db as jest.Mocked<typeof db>;
 const mockGetUserStatsSummary = getUserStatsSummary as jest.Mock;
+
+// Base mock user with all fields required by buildSettingsSection
+const baseMockUser = {
+  id: 'user-123',
+  displayName: 'Test User',
+  slackId: 'U12345',
+  role: 'DEVELOPER' as const,
+  achievements: [] as Array<{ achievement: { icon: string; displayName: string } }>,
+  skills: [] as Array<{ skill: { name: string } }>,
+  timezone: 'UTC',
+  workingHoursStart: null as string | null,
+  workingHoursEnd: null as string | null,
+};
 
 describe('App Home View Builder', () => {
   beforeEach(() => {
@@ -53,10 +70,7 @@ describe('App Home View Builder', () => {
 
     it('builds complete view for existing user', async () => {
       const mockUser = {
-        id: 'user-123',
-        displayName: 'Test User',
-        slackId: 'U12345',
-        role: 'DEVELOPER',
+        ...baseMockUser,
         achievements: [
           {
             achievement: {
@@ -106,13 +120,7 @@ describe('App Home View Builder', () => {
     });
 
     it('includes admin section for ADMIN role', async () => {
-      const mockUser = {
-        id: 'user-123',
-        displayName: 'Admin User',
-        slackId: 'U12345',
-        role: 'ADMIN',
-        achievements: [],
-      };
+      const mockUser = { ...baseMockUser, displayName: 'Admin User', role: 'ADMIN' as const };
 
       (mockDb.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (mockDb.assignment.findMany as jest.Mock).mockResolvedValue([]);
@@ -120,6 +128,7 @@ describe('App Home View Builder', () => {
       (mockDb.repository.count as jest.Mock).mockResolvedValue(5);
       (mockDb.user.count as jest.Mock).mockResolvedValue(10);
       (mockDb.assignment.count as jest.Mock).mockResolvedValue(3);
+      ((mockDb as any).assignmentProblem.count as jest.Mock).mockResolvedValue(0);
       mockGetUserStatsSummary.mockResolvedValue(null);
 
       const view = await buildAppHomeView('U12345');
@@ -132,13 +141,7 @@ describe('App Home View Builder', () => {
     });
 
     it('includes admin section for TEAM_LEAD role', async () => {
-      const mockUser = {
-        id: 'user-123',
-        displayName: 'Team Lead',
-        slackId: 'U12345',
-        role: 'TEAM_LEAD',
-        achievements: [],
-      };
+      const mockUser = { ...baseMockUser, displayName: 'Team Lead', role: 'TEAM_LEAD' as const };
 
       (mockDb.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (mockDb.assignment.findMany as jest.Mock).mockResolvedValue([]);
@@ -146,6 +149,7 @@ describe('App Home View Builder', () => {
       (mockDb.repository.count as jest.Mock).mockResolvedValue(5);
       (mockDb.user.count as jest.Mock).mockResolvedValue(10);
       (mockDb.assignment.count as jest.Mock).mockResolvedValue(3);
+      ((mockDb as any).assignmentProblem.count as jest.Mock).mockResolvedValue(0);
       mockGetUserStatsSummary.mockResolvedValue(null);
 
       const view = await buildAppHomeView('U12345');
@@ -157,13 +161,7 @@ describe('App Home View Builder', () => {
     });
 
     it('excludes admin section for DEVELOPER role', async () => {
-      const mockUser = {
-        id: 'user-123',
-        displayName: 'Developer',
-        slackId: 'U12345',
-        role: 'DEVELOPER',
-        achievements: [],
-      };
+      const mockUser = { ...baseMockUser, displayName: 'Developer' };
 
       (mockDb.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (mockDb.assignment.findMany as jest.Mock).mockResolvedValue([]);
@@ -179,13 +177,7 @@ describe('App Home View Builder', () => {
     });
 
     it('shows "no pending reviews" message when no assignments', async () => {
-      const mockUser = {
-        id: 'user-123',
-        displayName: 'Test User',
-        slackId: 'U12345',
-        role: 'DEVELOPER',
-        achievements: [],
-      };
+      const mockUser = { ...baseMockUser };
 
       (mockDb.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (mockDb.assignment.findMany as jest.Mock).mockResolvedValue([]);
@@ -206,13 +198,7 @@ describe('App Home View Builder', () => {
     });
 
     it('shows pending assignments count correctly', async () => {
-      const mockUser = {
-        id: 'user-123',
-        displayName: 'Test User',
-        slackId: 'U12345',
-        role: 'DEVELOPER',
-        achievements: [],
-      };
+      const mockUser = { ...baseMockUser };
 
       const mockAssignments = [
         { id: '1', prTitle: 'PR 1', prNumber: 1, prUrl: 'url1', complexity: 'SMALL', assignedAt: new Date(), repository: { name: 'repo' } },

@@ -144,14 +144,97 @@ async function seedSkills() {
   console.log(`  Created ${skills.length} skills`);
 }
 
+async function seedAchievements() {
+  console.log('Seeding achievements...');
+
+  const achievements = [
+    // Speed
+    { name: 'speed_demon', displayName: 'Speed Demon', description: 'Complete a review in under 30 minutes', icon: '⚡', category: 'speed', criteria: { type: 'fastest_response', threshold: 30 } },
+    { name: 'lightning_fast', displayName: 'Lightning Fast', description: 'Complete a review in under 15 minutes', icon: '🌩️', category: 'speed', criteria: { type: 'fastest_response', threshold: 15 } },
+    { name: 'consistent_responder', displayName: 'Consistent Responder', description: 'Maintain an average response time under 2 hours', icon: '⏱️', category: 'speed', criteria: { type: 'avg_response_time', threshold: 120 } },
+    // Volume
+    { name: 'first_review', displayName: 'First Steps', description: 'Complete your first code review', icon: '🎯', category: 'volume', criteria: { type: 'reviews_completed', threshold: 1 } },
+    { name: 'getting_started', displayName: 'Getting Started', description: 'Complete 5 code reviews', icon: '🚀', category: 'volume', criteria: { type: 'reviews_completed', threshold: 5 } },
+    { name: 'review_veteran', displayName: 'Review Veteran', description: 'Complete 25 code reviews', icon: '🎖️', category: 'volume', criteria: { type: 'reviews_completed', threshold: 25 } },
+    { name: 'review_master', displayName: 'Review Master', description: 'Complete 50 code reviews', icon: '👑', category: 'volume', criteria: { type: 'reviews_completed', threshold: 50 } },
+    { name: 'review_legend', displayName: 'Review Legend', description: 'Complete 100 code reviews', icon: '🏆', category: 'volume', criteria: { type: 'reviews_completed', threshold: 100 } },
+    // Streak
+    { name: 'on_a_roll', displayName: 'On a Roll', description: 'Maintain a 3-review streak', icon: '🔥', category: 'streak', criteria: { type: 'streak', threshold: 3 } },
+    { name: 'unstoppable', displayName: 'Unstoppable', description: 'Maintain a 7-review streak', icon: '💪', category: 'streak', criteria: { type: 'streak', threshold: 7 } },
+    { name: 'iron_reviewer', displayName: 'Iron Reviewer', description: 'Maintain a 14-review streak', icon: '🛡️', category: 'streak', criteria: { type: 'streak', threshold: 14 } },
+    // Quality
+    { name: 'point_collector', displayName: 'Point Collector', description: 'Earn 100 points', icon: '⭐', category: 'quality', criteria: { type: 'points', threshold: 100 } },
+    { name: 'high_scorer', displayName: 'High Scorer', description: 'Earn 500 points', icon: '🌟', category: 'quality', criteria: { type: 'points', threshold: 500 } },
+    { name: 'point_master', displayName: 'Point Master', description: 'Earn 1000 points', icon: '💫', category: 'quality', criteria: { type: 'points', threshold: 1000 } },
+    // Special
+    { name: 'polyglot', displayName: 'Polyglot', description: 'Review PRs using 5 different skills/languages', icon: '🌐', category: 'special', criteria: { type: 'skills_used', threshold: 5 } },
+    { name: 'explorer', displayName: 'Explorer', description: 'Review PRs in 3 different repositories', icon: '🗺️', category: 'special', criteria: { type: 'repos_reviewed', threshold: 3 } },
+  ];
+
+  for (const achievement of achievements) {
+    await prisma.achievement.upsert({
+      where: { name: achievement.name },
+      create: {
+        name: achievement.name,
+        displayName: achievement.displayName,
+        description: achievement.description,
+        icon: achievement.icon,
+        category: achievement.category,
+        criteria: achievement.criteria,
+      },
+      update: {
+        displayName: achievement.displayName,
+        description: achievement.description,
+        icon: achievement.icon,
+        category: achievement.category,
+        criteria: achievement.criteria,
+      },
+    });
+  }
+
+  console.log(`  Created ${achievements.length} achievements`);
+}
+
+async function seedAppConfig() {
+  console.log('Seeding app configuration...');
+
+  const defaults: { key: string; value: string; description: string }[] = [
+    { key: 'default_timezone', value: 'UTC', description: 'Default timezone for new users' },
+    { key: 'digest_day', value: 'monday', description: 'Day of week to send weekly digest' },
+    { key: 'digest_hour', value: '9', description: 'Hour of day (0-23) to send weekly digest' },
+    { key: 'max_pending_reviews', value: '5', description: 'Max pending reviews before a reviewer is considered overloaded' },
+    { key: 'points_per_review', value: '10', description: 'Base points awarded per completed review' },
+    { key: 'points_speed_bonus_threshold', value: '60', description: 'Minutes under which a speed bonus is awarded' },
+    { key: 'points_speed_bonus', value: '5', description: 'Extra points for reviews completed under speed threshold' },
+    { key: 'stale_review_hours', value: '48', description: 'Hours after which a review is considered stale' },
+    { key: 'problem_check_interval', value: '15', description: 'Minutes between problem detection runs' },
+    { key: 'dashboard_enabled', value: 'true', description: 'Whether the web dashboard is enabled' },
+  ];
+
+  for (const config of defaults) {
+    await prisma.appConfig.upsert({
+      where: { key: config.key },
+      create: config,
+      update: {
+        value: config.value,
+        description: config.description,
+      },
+    });
+  }
+
+  console.log(`  Created ${defaults.length} config entries`);
+}
+
 async function main() {
-  console.log('🌱 Seeding PR Roulette defaults...\n');
+  console.log('Seeding PR Roulette defaults...\n');
 
   await seedStatusMappings();
   await seedProblemRules();
   await seedSkills();
+  await seedAchievements();
+  await seedAppConfig();
 
-  console.log('\n✅ Seed complete!');
+  console.log('\nSeed complete!');
 }
 
 main()

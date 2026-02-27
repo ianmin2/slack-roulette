@@ -102,6 +102,18 @@ const getOverallStatus = (checks: HealthCheck['checks']): HealthCheck['status'] 
  * Returns health check status
  */
 export async function GET() {
+  // During shutdown, immediately return unhealthy
+  if (isShuttingDown) {
+    return NextResponse.json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version ?? '0.1.0',
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      shuttingDown: true,
+      checks: { database: { status: 'down' }, cache: { status: 'down' } },
+    }, { status: 503 });
+  }
+
   const [database, cacheHealth] = await Promise.all([
     checkDatabase(),
     checkCache(),
@@ -138,4 +150,39 @@ export async function HEAD() {
   } catch {
     return new NextResponse(null, { status: 503 });
   }
+}
+
+// Graceful shutdown flag — set by the process event handlers
+let isShuttingDown = false;
+
+/**
+ * Signal the health endpoint that we're shutting down.
+ * Kubernetes/PM2 probes will see 503 and stop sending traffic.
+ */
+export const setShuttingDown = () => {
+  isShuttingDown = true;
+};
+
+// Register shutdown handlers (runs once on module load, skip during build)
+if (typeof process !== 'undefined' && process.env.NEXT_PHASE !== 'phase-production-build') {
+  const gracefulShutdown = async (signal: string) => {
+    isShuttingDown = true;
+    console.log(`[health] Received ${signal}, starting graceful shutdown...`);
+
+    // Give in-flight requests time to complete
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    // Disconnect Prisma
+    try {
+      await db.$disconnect();
+      console.log('[health] Database disconnected');
+    } catch {
+      // Ignore disconnect errors during shutdown
+    }
+
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
